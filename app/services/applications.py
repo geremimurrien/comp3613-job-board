@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 from app.database import engine
 from app.models.application import Application
 from app.models.listing import Listing
+from app.services import listings as listing_service
 from app.services.board_auth import get_user
 from app.services.lifecycle import ACTIONS, apply_action, derived_status_from_flags
 
@@ -30,13 +31,19 @@ def apply(
         if listing is None:
             return {"ok": False, "error": "listing not found", "status_code": 404}
 
-        from datetime import date
+        if hasattr(listing_service, "is_open"):
+            is_open = listing_service.is_open(listing)
+        else:
+            from datetime import date
 
-        try:
-            deadline = date.fromisoformat(listing.deadline)
-        except (TypeError, ValueError):
-            return {"ok": False, "error": "listing deadline is invalid", "status_code": 400}
-        if listing.status != "published" or deadline < date.today():
+            try:
+                is_open = (
+                    listing.status == "published"
+                    and date.fromisoformat(listing.deadline) >= date.today()
+                )
+            except (TypeError, ValueError):
+                is_open = False
+        if not is_open:
             return {"ok": False, "error": "listing is closed", "status_code": 400}
 
         if listing.apply_mode == "external":
@@ -79,8 +86,6 @@ def apply(
 
 
 def my_applications(graduate_id: int) -> list[dict[str, Any]]:
-    from datetime import date
-
     with Session(engine) as session:
         rows = session.exec(
             select(Application)
@@ -91,10 +96,18 @@ def my_applications(graduate_id: int) -> list[dict[str, Any]]:
         for row in rows:
             view = row.model_dump()
             listing = session.get(Listing, row.listing_id)
-            is_open = False
-            if listing is not None and listing.status == "published":
+            if listing is None:
+                is_open = False
+            elif hasattr(listing_service, "is_open"):
+                is_open = listing_service.is_open(listing)
+            else:
+                from datetime import date
+
                 try:
-                    is_open = date.fromisoformat(listing.deadline) >= date.today()
+                    is_open = (
+                        listing.status == "published"
+                        and date.fromisoformat(listing.deadline) >= date.today()
+                    )
                 except (TypeError, ValueError):
                     is_open = False
 

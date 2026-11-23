@@ -24,7 +24,8 @@ class Application(SQLModel, table=True):
         if action_method is None:
             raise InvalidTransitionError(from_status, action)
 
-        next_status = action_method(self)
+        next_state = action_method(self)
+        next_status = next_state.name
         self.status = next_status
         return StatusChange(
             application_id=self.id,
