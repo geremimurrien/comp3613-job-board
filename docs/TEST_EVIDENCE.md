@@ -1,6 +1,6 @@
 # Test & coverage evidence
 
-Branch: `feature/2-tests-coverage-evidence`
+Branch: `feature/2-tests-coverage-evidence` · Owner: Johnathan Laldeo
 
 ## How to reproduce
 
@@ -12,30 +12,34 @@ pytest --cov-report=html                 # browsable report in docs/coverage/htm
 
 Tests run against a throwaway SQLite file in the OS temp folder (set in
 `tests/conftest.py`), so they never touch the developer `database.db`.
-Each API test re-seeds the database, so tests are independent and order-free.
+Each API test re-seeds the database, so tests are independent.
 
 ## Result
 
-- **111 tests, all passing** — full list in [`coverage/test-results.txt`](coverage/test-results.txt)
-- **Coverage (line + branch)** — full report in [`coverage/coverage.txt`](coverage/coverage.txt)
+Measured on this branch **with PR #5 (transitions) merged in**. Until #5 lands
+on `main`, the AC10/AC12 transition tests fail because `main`'s transition
+endpoint still writes the removed `flag_*` columns.
 
-| Module (job-board domain) | Before | After |
+- **148 tests, all passing**: full list in [`coverage/test-results.txt`](coverage/test-results.txt)
+- **Coverage (line + branch)**: full report in [`coverage/coverage.txt`](coverage/coverage.txt)
+
+| Module (job-board domain) | Starter | Now |
 |---|---|---|
-| `services/application_states.py` | 97% | 98% |
-| `services/applications.py` | 16% | 95% |
-| `services/listings.py` | 27% | 89% |
-| `routers/board.py` | 60% | 98% |
-| `services/board_auth.py` | 76% | 94% |
-| `services/lifecycle.py` (flag-based tracker) | 8% | removed |
+| `routers/board.py` | 60% | 94% |
+| `services/applications.py` | 16% | 85% |
+| `services/listings.py` | 27% | 92% |
+| `services/application_states.py` | 97% | 97% |
 
-Project total is 65%. The remainder is mostly FastStart base code (server config
-panel, SSR templates/CLI). Course tooling (`report_pdf.py`, `transcript_export.py`,
-`usecase_diagram.py`, `skill_integrity.py`, `cli.py`) is excluded in `.coveragerc`
-because it is not job-board behaviour.
+Project total is 66%. The rest is mostly FastStart base code (server config
+panel, SSR pages). Course tooling (`report_pdf.py`, `transcript_export.py`,
+`usecase_diagram.py`, `skill_integrity.py`, `cli.py`) is excluded in `.coveragerc`.
 
 ## Acceptance criteria → tests
 
-All in `tests/test_acceptance.py` unless noted. Test classes are named after the criterion.
+API-level tests in `tests/test_acceptance.py`; each class is named after its criterion.
+Teammates' unit/service tests (`test_states.py`, `test_models.py`,
+`test_apply_privacy.py`, `test_listings.py`, `test_transitions.py`) cover the same
+rules closer to the code.
 
 | # | Criterion | Test class |
 |---|---|---|
@@ -48,35 +52,33 @@ All in `tests/test_acceptance.py` unless noted. Test classes are named after the
 | 7 | Publishing notifies subscribers automatically | `TestAC7PublishNotifies` |
 | 8 | Only DCIT graduates subscribe/apply | `TestAC8Eligibility` |
 | 9 | On-platform apply captures cover letter + resume, starts `submitted` | `TestAC9OnPlatformApply` |
-| 10 | Only legal lifecycle transitions | `TestAC10Lifecycle`, `tests/test_states.py` |
+| 10 | Only legal lifecycle transitions | `TestAC10Lifecycle` |
 | 11 | One consistent status | `TestAC11ConsistentStatus` |
 | 12 | Only listing employer advances lifecycle | `TestAC12OnlyListingEmployerTransitions` |
 | 13 | External-link apply not recorded in-app | `TestAC13ExternalApply` |
-| 14 | Passwords hashed; never returned | `TestAC14Passwords`, `TestUnauthorizedResponses`, `tests/test_unit.py` |
+| 14 | Passwords hashed; never returned | `TestAC14Passwords`, `TestUnauthorizedResponses` |
 | 15 | Employers can't see other listings' applicants | `TestAC15EmployerDataIsolation` |
 | 16 | Admin export of applicant packages | `TestAC16AdminExport` |
 
-## Defects found and fixed
+## Defects found by these tests and fixed in this PR
 
-| Defect | Criterion | Fix |
+| Defect | AC | Fix |
 |---|---|---|
-| Employer listings published immediately, skipping admin review | 4 | `submit_listing` creates `pending`; only `pending` can be published |
-| `/api/jobs` returned pending and expired listings | 4, 6 | Filter to published and `deadline >= today` |
-| Publishing did not notify subscribers | 7 | `publish_listing` notifies in the same transaction |
-| No DCIT check on subscribe/apply | 8 | `is_eligible_graduate` used by both |
-| Could apply to pending/expired listings | 4, 6 | Apply requires listing open to graduates |
-| External listings created an application row | 13 | Returns `external_url`, `collected: false`, writes nothing |
-| Lifecycle allowed jumps (e.g. submitted → hired), hire after reject, `reopen` left stale flags | 10 | Replaced `lifecycle.py` with the State pattern (`application_states.py`); illegal moves → 409 |
-| Status stored as string **and** four flags; graduate view read the flags | 11 | Flag columns removed; `status` is the single source of truth |
-| Admins and any employer could transition any application | 12 | Only the employer who owns the listing; others → 403 |
-| Any employer could read any listing's applicants (IDOR) | 15 | Ownership check; admin allowed for export |
-| Global 401 handler served HTML with **200 OK**, so a failed API login looked successful | 14 | `/api/*` gets JSON 401; HTML page keeps status 401 |
-| All service errors surfaced as 400 | — | Services return a `code`; router maps to 403/404/409 |
+| Global 401 handler served HTML with **200 OK**, so a failed API login looked successful | 14 | `app/main.py`: `/api/*` gets JSON 401; HTML page keeps status 401 |
+| Subscribe, apply and export endpoints ignored the service's `status_code` (e.g. non-DCIT got 400, not 403) | 8, 12 | `app/routers/board.py` uses `result["status_code"]` |
+| Empty cover letter accepted | 9 | `apply()` requires a non-blank cover letter |
+| Listing deadline not validated ("next week" accepted, listing then never visible) | 5, 6 | `submit_listing()` requires ISO `YYYY-MM-DD` |
+| Admin could "notify" subscribers about a pending listing | 4, 7 | `notify_subscribers()` requires a published listing |
 
-### Design decision: no `reopen`
+Defects fixed by teammates (PRs #1–#3, #5) are verified by the same tests:
+pending-until-published, deadline hiding, auto-notify on publish, DCIT
+eligibility, external apply not recorded, State-pattern lifecycle with no
+illegal jumps, single `status` column, listing-employer-only transitions and
+applicant-data ownership.
 
-`rejected` and `hired` are terminal. Criterion 10 allows terminal → active only
-with a defensible reopen rule; we chose none. A rejected candidate re-applies
-instead of an employer silently reviving a closed decision, which keeps the
-history honest and the state machine small. Adding one later means adding a
-`reopen` method to `RejectedState` only.
+## Known gaps (not fixed here)
+
+- `GET /api/users` (FastStart base) lists every user's email without login.
+- `my_applications` adds a `display_status` of `closed` for submitted/reviewed
+  applications on closed listings. This is a deliberate team choice, but it is a
+  second label beside `status` (AC11). Worth defending in the demo.

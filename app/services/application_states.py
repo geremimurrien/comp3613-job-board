@@ -111,28 +111,8 @@ STATES: dict[str, ApplicationState] = {
 }
 
 
-INITIAL_STATUS = "submitted"
-
-# Actions an employer may request. There is deliberately no "reopen": rejected
-# and hired are final decisions, so an applicant re-applies instead of an
-# employer silently reviving a closed application.
-ACTIONS: tuple[str, ...] = ("mark_reviewed", "shortlist", "reject", "hire")
-
-
 def state_for(status: str) -> ApplicationState:
     try:
         return STATES[status]
     except KeyError:
         raise ValueError(f"unknown application status: {status!r}") from None
-
-
-def next_status(current_status: str, action: str, app: Any = None) -> str:
-    """Return the status reached by applying *action* to *current_status*.
-
-    Raises ValueError for an unknown action and InvalidTransitionError for an
-    action the current state does not allow.
-    """
-    if action not in ACTIONS:
-        raise ValueError(f"unknown action {action!r}; expected one of {ACTIONS}")
-    state = state_for(current_status)
-    return getattr(state, action)(app).name

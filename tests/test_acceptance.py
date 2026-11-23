@@ -165,7 +165,9 @@ class TestAC4PendingNotVisible:
 
     def test_cannot_apply_to_pending_listing(self, client, users):
         lid = submit(client, users["employer"]).json()["listing_id"]
-        assert apply(client, users["grad.dcit"], lid).status_code == 404
+        r = apply(client, users["grad.dcit"], lid)
+        assert r.status_code == 400
+        assert r.json()["detail"] == "listing is closed"
 
     def test_cannot_publish_twice(self, client, users, junior):
         assert publish(client, users["admin"], junior).status_code == 409
@@ -198,7 +200,9 @@ class TestAC6Deadline:
 
     def test_cannot_apply_after_deadline(self, client, users, db):
         lid = listing_id(db, "Expired Analyst Role")
-        assert apply(client, users["grad.dcit"], lid).status_code == 404
+        r = apply(client, users["grad.dcit"], lid)
+        assert r.status_code == 400
+        assert r.json()["detail"] == "listing is closed"
 
     def test_deadline_day_is_still_open_and_day_after_is_closed(self, client, users):
         today = date.today()
@@ -221,7 +225,7 @@ class TestAC7PublishNotifies:
         r = publish(client, users["admin"], lid)
         assert r.status_code == 200
         assert r.json()["notified"] is True
-        assert r.json()["count"] == 1
+        assert r.json()["notification_count"] == 1
 
         notes = db.exec(
             select(Notification).where(Notification.user_id == users["grad.dcit"])
@@ -252,7 +256,9 @@ class TestAC8Eligibility:
 
     def test_non_dcit_graduate_cannot_apply(self, client, users, junior, db):
         assert apply(client, users["grad.other"], junior).status_code == 403
-        assert db.exec(select(Application)).all() == []
+        assert db.exec(
+            select(Application).where(Application.graduate_id == users["grad.other"])
+        ).all() == []
 
     def test_subscribe_is_idempotent(self, client, users):
         grad = users["grad.dcit"]
@@ -268,7 +274,6 @@ class TestAC9OnPlatformApply:
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "submitted"
-        assert body["collected"] is True
 
         row = db.get(Application, body["application_id"])
         assert (row.cover_letter, row.resume_text, row.status) == (
@@ -300,7 +305,7 @@ class TestAC10Lifecycle:
         for action, status in zip(LEGAL_PATH + [final], expected):
             r = transition(client, e, application_id, action)
             assert r.status_code == 200, r.text
-            assert r.json()["application"]["status"] == status
+            assert r.json()["to_status"] == status
 
     @pytest.mark.parametrize("action", ["shortlist", "hire", "reject"])
     def test_no_jumps_from_submitted(self, client, users, application_id, db, action):
@@ -341,19 +346,25 @@ class TestAC10Lifecycle:
 
 
 class TestAC11ConsistentStatus:
+    @staticmethod
+    def mine(client, grad, app_id):
+        r = client.get(f"{API}/graduates/applications", params={"actor_id": grad})
+        return next(a for a in r.json()["applications"] if a["id"] == app_id)
+
     def test_graduate_view_matches_stored_status(self, client, users, application_id, db):
         e, grad = users["employer"], users["grad.dcit"]
         for action in LEGAL_PATH + ["reject"]:
             transition(client, e, application_id, action)
-            r = client.get(f"{API}/graduates/applications", params={"actor_id": grad})
-            (mine,) = r.json()["applications"]
+            view = self.mine(client, grad, application_id)
             db.expire_all()
-            assert mine["status"] == db.get(Application, application_id).status
+            stored = db.get(Application, application_id).status
+            assert view["status"] == stored
+            # listing is open, so the display label must agree with status
+            assert view["display_status"] == stored
 
-    def test_status_is_the_only_lifecycle_field(self, client, users, application_id):
-        r = client.get(f"{API}/graduates/applications", params={"actor_id": users["grad.dcit"]})
-        (mine,) = r.json()["applications"]
-        assert not [k for k in mine if k.startswith("flag_")]
+    def test_no_parallel_flag_fields(self, client, users, application_id):
+        view = self.mine(client, users["grad.dcit"], application_id)
+        assert not [k for k in view if k.startswith("flag_")]
 
 
 class TestAC12OnlyListingEmployerTransitions:
@@ -376,7 +387,7 @@ class TestAC13ExternalApply:
         r = apply(client, users["grad.dcit"], qa)
         assert r.status_code == 200
         body = r.json()
-        assert body["collected"] is False
+        assert body["external"] is True
         assert body["external_url"] == "https://example.com/apply/qa"
         assert "application_id" not in body
         assert db.exec(select(Application).where(Application.listing_id == qa)).all() == []
