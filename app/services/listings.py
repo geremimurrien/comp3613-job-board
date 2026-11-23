@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlmodel import Session, select
@@ -33,9 +34,22 @@ def subscribe(graduate_id: int) -> dict[str, Any]:
 
 def list_jobs_for_graduates() -> list[dict[str, Any]]:
     with Session(engine) as session:
-        # DEFECT: returns pending + expired listings
-        rows = session.exec(select(Listing).order_by(Listing.id)).all()
-        return [r.model_dump() for r in rows]
+        rows = session.exec(
+            select(Listing)
+            .where(Listing.status == "published")
+            .order_by(Listing.id)
+        ).all()
+        return [row.model_dump() for row in rows if is_open(row)]
+
+
+def is_open(listing: Listing) -> bool:
+    if listing.status != "published":
+        return False
+    try:
+        deadline = date.fromisoformat(listing.deadline)
+    except (TypeError, ValueError):
+        return False
+    return deadline >= datetime.now(timezone.utc).date()
 
 
 def list_pending_for_admin() -> list[dict[str, Any]]:
@@ -57,14 +71,25 @@ def submit_listing(
 ) -> dict[str, Any]:
     user = get_user(employer_id)
     if not user or user["role"] != "employer":
-        return {"ok": False, "error": "employers only"}
+        return {
+            "ok": False,
+            "error": "employers only",
+            "status_code": 403,
+        }
     if apply_mode not in {"collect", "external"}:
-        return {"ok": False, "error": "apply_mode must be collect|external"}
+        return {
+            "ok": False,
+            "error": "apply_mode must be collect|external",
+            "status_code": 400,
+        }
     if apply_mode == "external" and not external_url:
-        return {"ok": False, "error": "external_url required"}
+        return {
+            "ok": False,
+            "error": "external_url required",
+            "status_code": 400,
+        }
 
-    # DEFECT: published immediately (skip pending/admin)
-    status = "published"
+    status = "pending"
     with Session(engine) as session:
         listing = Listing(
             employer_id=employer_id,
@@ -85,26 +110,105 @@ def submit_listing(
 def publish_listing(admin_id: int, listing_id: int) -> dict[str, Any]:
     admin = get_user(admin_id)
     if not admin or admin["role"] != "admin":
-        return {"ok": False, "error": "admin only"}
+        return {"ok": False, "error": "admin only", "status_code": 403}
     with Session(engine) as session:
         listing = session.get(Listing, listing_id)
         if listing is None:
-            return {"ok": False, "error": "listing not found"}
+            return {
+                "ok": False,
+                "error": "listing not found",
+                "status_code": 404,
+            }
+        if listing.status != "pending":
+            return {
+                "ok": False,
+                "error": "only pending listings can be published",
+                "status_code": 409,
+            }
+
         listing.status = "published"
+        subscribers = session.exec(select(Subscription)).all()
+        notifications = [
+            Notification(
+                user_id=subscriber.graduate_id,
+                message=(
+                    f"New job published: {listing.title} at {listing.company}"
+                ),
+            )
+            for subscriber in subscribers
+        ]
+        session.add(listing)
+        session.add_all(notifications)
+        session.commit()
+    return {
+        "ok": True,
+        "listing_id": listing_id,
+        "status": "published",
+        "notified": True,
+        "notification_count": len(notifications),
+    }
+
+
+def reject_listing(admin_id: int, listing_id: int) -> dict[str, Any]:
+    admin = get_user(admin_id)
+    if not admin or admin["role"] != "admin":
+        return {"ok": False, "error": "admin only", "status_code": 403}
+    with Session(engine) as session:
+        listing = session.get(Listing, listing_id)
+        if listing is None:
+            return {
+                "ok": False,
+                "error": "listing not found",
+                "status_code": 404,
+            }
+        if listing.status != "pending":
+            return {
+                "ok": False,
+                "error": "only pending listings can be rejected",
+                "status_code": 409,
+            }
+        listing.status = "rejected"
         session.add(listing)
         session.commit()
-    # DEFECT: publish does not notify subscribers
-    return {"ok": True, "notified": False}
+    return {"ok": True, "listing_id": listing_id, "status": "rejected"}
+
+
+def unpublish_listing(admin_id: int, listing_id: int) -> dict[str, Any]:
+    admin = get_user(admin_id)
+    if not admin or admin["role"] != "admin":
+        return {"ok": False, "error": "admin only", "status_code": 403}
+    with Session(engine) as session:
+        listing = session.get(Listing, listing_id)
+        if listing is None:
+            return {
+                "ok": False,
+                "error": "listing not found",
+                "status_code": 404,
+            }
+        if listing.status != "published":
+            return {
+                "ok": False,
+                "error": "only published listings can be unpublished",
+                "status_code": 409,
+            }
+        listing.status = "unpublished"
+        session.add(listing)
+        session.commit()
+    return {"ok": True, "listing_id": listing_id, "status": "unpublished"}
 
 
 def notify_subscribers(admin_id: int, listing_id: int) -> dict[str, Any]:
     admin = get_user(admin_id)
     if not admin or admin["role"] != "admin":
-        return {"ok": False, "error": "admin only"}
+        return {"ok": False, "error": "admin only", "status_code": 403}
     with Session(engine) as session:
         listing = session.get(Listing, listing_id)
         if listing is None:
-            return {"ok": False, "error": "listing not found"}
+            return {
+                "ok": False,
+                "error": "listing not found",
+                "status_code": 404,
+            }
         subs = session.exec(select(Subscription)).all()
         for sub in subs:
             session.add(
