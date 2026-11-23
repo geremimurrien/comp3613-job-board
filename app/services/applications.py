@@ -9,9 +9,10 @@ from sqlmodel import Session, select
 from app.database import engine
 from app.models.application import Application
 from app.models.listing import Listing
+from app.models.notification import Notification
 from app.services import listings as listing_service
+from app.services.application_states import InvalidTransitionError
 from app.services.board_auth import get_user
-from app.services.lifecycle import ACTIONS, apply_action, derived_status_from_flags
 
 
 def apply(
@@ -159,38 +160,76 @@ def export_applicants(admin_id: int, listing_id: int) -> dict[str, Any]:
 def transition_application(
     actor_id: int, application_id: int, action: str
 ) -> dict[str, Any]:
-    """Drive the poorly factored lifecycle module."""
-    actor = get_user(actor_id)
-    if not actor:
-        return {"ok": False, "error": "unknown user"}
-    # DEFECT: admin may transition; any employer may transition any application
-    if actor["role"] not in {"employer", "admin"}:
-        return {"ok": False, "error": "forbidden"}
-    if action not in ACTIONS:
-        return {"ok": False, "error": f"action must be one of {ACTIONS}"}
-
+    """Perform and persist one legal application state transition."""
     with Session(engine) as session:
-        row = session.get(Application, application_id)
-        if row is None:
-            return {"ok": False, "error": "application not found"}
-
-        result = apply_action(row.model_dump(), action)
-        if not result.get("ok"):
-            return result
-        if not result.get("changed"):
+        application = session.get(Application, application_id)
+        if application is None:
             return {
-                "ok": True,
-                "application": result["application"],
-                "changed": False,
+                "ok": False,
+                "error": "application not found",
+                "status_code": 404,
+            }
+        listing = session.get(Listing, application.listing_id)
+        if listing is None:
+            return {"ok": False, "error": "listing not found", "status_code": 404}
+
+        actor = get_user(actor_id)
+        if (
+            not actor
+            or actor["role"] != "employer"
+            or actor["id"] != listing.employer_id
+        ):
+            return {
+                "ok": False,
+                "error": "only the listing employer may transition applications",
+                "status_code": 403,
             }
 
-        updated = result["row"]
-        row.status = updated["status"]
-        row.flag_reviewed = updated["flag_reviewed"]
-        row.flag_shortlisted = updated["flag_shortlisted"]
-        row.flag_rejected = updated["flag_rejected"]
-        row.flag_hired = updated["flag_hired"]
-        session.add(row)
+        if (
+            not listing_service.is_open(listing)
+            and application.status in {"submitted", "reviewed"}
+        ):
+            return {
+                "ok": False,
+                "error": f"cannot change a {application.status} application when the listing is closed",
+                "status_code": 409,
+            }
+
+        if action not in {"mark_reviewed", "shortlist", "reject", "hire"}:
+            return {
+                "ok": False,
+                "error": f"unknown action: {action}",
+                "status_code": 400,
+            }
+
+        from_status = application.status
+        try:
+            status_change = application.perform(action, actor_id)
+        except InvalidTransitionError as exc:
+            return {
+                "ok": False,
+                "error": (
+                    f"invalid transition from {exc.from_status} "
+                    f"using action {exc.action}"
+                ),
+                "status_code": 409,
+            }
+
+        session.add(status_change)
+        session.add(
+            Notification(
+                user_id=application.graduate_id,
+                message=(
+                    f"Your application for {listing.title} changed "
+                    f"from {from_status} to {application.status}."
+                ),
+            )
+        )
         session.commit()
-        session.refresh(row)
-        return {"ok": True, "application": row.model_dump(), "changed": True}
+        return {
+            "ok": True,
+            "application_id": application.id,
+            "from_status": from_status,
+            "to_status": application.status,
+            "action": action,
+        }
