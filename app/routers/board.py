@@ -88,7 +88,9 @@ def submit_listing(body: ListingBody) -> dict[str, Any]:
         body.external_url,
     )
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        raise HTTPException(
+            status_code=result["status_code"], detail=result.get("error")
+        )
     return result
 
 
@@ -96,7 +98,29 @@ def submit_listing(body: ListingBody) -> dict[str, Any]:
 def publish(listing_id: int, body: ActorBody) -> dict[str, Any]:
     result = listings.publish_listing(body.actor_id, listing_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        raise HTTPException(
+            status_code=result["status_code"], detail=result.get("error")
+        )
+    return result
+
+
+@router.post("/admin/listings/{listing_id}/reject")
+def reject_listing(listing_id: int, body: ActorBody) -> dict[str, Any]:
+    result = listings.reject_listing(body.actor_id, listing_id)
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=result["status_code"], detail=result.get("error")
+        )
+    return result
+
+
+@router.post("/admin/listings/{listing_id}/unpublish")
+def unpublish_listing(listing_id: int, body: ActorBody) -> dict[str, Any]:
+    result = listings.unpublish_listing(body.actor_id, listing_id)
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=result["status_code"], detail=result.get("error")
+        )
     return result
 
 
@@ -104,7 +128,9 @@ def publish(listing_id: int, body: ActorBody) -> dict[str, Any]:
 def notify(listing_id: int, body: ActorBody) -> dict[str, Any]:
     result = listings.notify_subscribers(body.actor_id, listing_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        raise HTTPException(
+            status_code=result["status_code"], detail=result.get("error")
+        )
     return result
 
 
