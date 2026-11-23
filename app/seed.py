@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlmodel import Session, select
 
 from app.database import drop_all, ensure_db_and_tables, engine
+from app.models.application import Application
 from app.models.listing import Listing
 from app.models.subscription import Subscription
 from app.models.user import User
@@ -114,5 +115,48 @@ def seed(*, reset: bool = False) -> None:
         grad = session.exec(
             select(User).where(User.email == "grad.dcit@example.com")
         ).one()
+        listing = session.exec(
+            select(Listing).where(Listing.title == "Expired Analyst Role")
+        ).one()
+
         session.add(Subscription(graduate_id=grad.id))
+        session.add_all(
+            [
+                Application(
+                    listing_id=listing.id,
+                    graduate_id=grad.id,
+                    cover_letter="Submitted application",
+                    resume_text=grad.resume_text or "",
+                    status="submitted",
+                ),
+                Application(
+                    listing_id=listing.id,
+                    graduate_id=grad.id,
+                    cover_letter="Reviewed application",
+                    resume_text=grad.resume_text or "",
+                    status="reviewed",
+                ),
+                Application(
+                    listing_id=listing.id,
+                    graduate_id=grad.id,
+                    cover_letter="Shortlisted application",
+                    resume_text=grad.resume_text or "",
+                    status="shortlisted",
+                ),
+                Application(
+                    listing_id=listing.id,
+                    graduate_id=grad.id,
+                    cover_letter="Rejected application",
+                    resume_text=grad.resume_text or "",
+                    status="rejected",
+                ),
+                Application(
+                    listing_id=listing.id,
+                    graduate_id=grad.id,
+                    cover_letter="Hired application",
+                    resume_text=grad.resume_text or "",
+                    status="hired",
+                ),
+            ]
+        )
         session.commit()
