@@ -21,15 +21,45 @@ def apply(
 ) -> dict[str, Any]:
     user = get_user(graduate_id)
     if not user or user["role"] != "graduate":
-        return {"ok": False, "error": "graduates only"}
-    # DEFECT: no programme eligibility check
+        return {"ok": False, "error": "graduates only", "status_code": 403}
+    if user.get("programme") != "DCIT":
+        return {"ok": False, "error": "DCIT graduates only", "status_code": 403}
 
     with Session(engine) as session:
         listing = session.get(Listing, listing_id)
         if listing is None:
-            return {"ok": False, "error": "listing not found"}
+            return {"ok": False, "error": "listing not found", "status_code": 404}
 
-        # DEFECT: allows apply on pending / expired; external still creates a row
+        from datetime import date
+
+        try:
+            deadline = date.fromisoformat(listing.deadline)
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "listing deadline is invalid", "status_code": 400}
+        if listing.status != "published" or deadline < date.today():
+            return {"ok": False, "error": "listing is closed", "status_code": 400}
+
+        if listing.apply_mode == "external":
+            return {
+                "ok": True,
+                "external": True,
+                "external_url": listing.external_url,
+                "message": f"Apply externally: {listing.external_url}",
+            }
+
+        existing = session.exec(
+            select(Application).where(
+                Application.listing_id == listing_id,
+                Application.graduate_id == graduate_id,
+            )
+        ).all()
+        if any(application.status != "rejected" for application in existing):
+            return {
+                "ok": False,
+                "error": "active application already exists",
+                "status_code": 409,
+            }
+
         resume = resume_text or user.get("resume_text") or ""
         application = Application(
             listing_id=listing_id,
@@ -37,10 +67,6 @@ def apply(
             cover_letter=cover_letter,
             resume_text=resume,
             status="submitted",
-            flag_reviewed=0,
-            flag_shortlisted=0,
-            flag_rejected=0,
-            flag_hired=0,
         )
         session.add(application)
         session.commit()
@@ -53,6 +79,8 @@ def apply(
 
 
 def my_applications(graduate_id: int) -> list[dict[str, Any]]:
+    from datetime import date
+
     with Session(engine) as session:
         rows = session.exec(
             select(Application)
@@ -61,10 +89,20 @@ def my_applications(graduate_id: int) -> list[dict[str, Any]]:
         ).all()
         results = []
         for row in rows:
-            app = row.model_dump()
-            # DEFECT: graduate view sometimes uses flag-derived status, not column
-            view = dict(app)
-            view["status"] = derived_status_from_flags(app)
+            view = row.model_dump()
+            listing = session.get(Listing, row.listing_id)
+            is_open = False
+            if listing is not None and listing.status == "published":
+                try:
+                    is_open = date.fromisoformat(listing.deadline) >= date.today()
+                except (TypeError, ValueError):
+                    is_open = False
+
+            view["display_status"] = (
+                "closed"
+                if not is_open and row.status in {"submitted", "reviewed"}
+                else row.status
+            )
             results.append(view)
         return results
 
@@ -72,14 +110,15 @@ def my_applications(graduate_id: int) -> list[dict[str, Any]]:
 def listing_applicants(viewer_id: int, listing_id: int) -> dict[str, Any]:
     viewer = get_user(viewer_id)
     if not viewer:
-        return {"ok": False, "error": "unknown user"}
+        return {"ok": False, "error": "unknown user", "status_code": 404}
     with Session(engine) as session:
         listing = session.get(Listing, listing_id)
         if listing is None:
-            return {"ok": False, "error": "listing not found"}
-        # DEFECT (IDOR): ownership not checked for employers
+            return {"ok": False, "error": "listing not found", "status_code": 404}
+        if viewer["role"] == "employer" and listing.employer_id != viewer_id:
+            return {"ok": False, "error": "forbidden", "status_code": 403}
         if viewer["role"] not in {"employer", "admin"}:
-            return {"ok": False, "error": "forbidden"}
+            return {"ok": False, "error": "forbidden", "status_code": 403}
         rows = session.exec(
             select(Application)
             .where(Application.listing_id == listing_id)
@@ -91,7 +130,7 @@ def listing_applicants(viewer_id: int, listing_id: int) -> dict[str, Any]:
 def export_applicants(admin_id: int, listing_id: int) -> dict[str, Any]:
     admin = get_user(admin_id)
     if not admin or admin["role"] != "admin":
-        return {"ok": False, "error": "admin only"}
+        return {"ok": False, "error": "admin only", "status_code": 403}
     result = listing_applicants(admin_id, listing_id)
     if not result.get("ok"):
         return result
