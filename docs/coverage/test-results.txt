@@ -146,4 +146,4 @@ tests/test_unit.py::test_password_hash_round_trip_and_rejects_wrong_password
 tests/test_unit.py::test_authenticate_user_returns_token_for_valid_credentials
 tests/test_unit.py::test_authenticate_user_returns_none_for_invalid_credentials
 tests/test_unit.py::test_access_token_contains_subject_and_role
-148 passed in 96.55s (0:01:36)
+148 passed in 75.72s (0:01:15)

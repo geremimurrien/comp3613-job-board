@@ -16,9 +16,7 @@ Each API test re-seeds the database, so tests are independent.
 
 ## Result
 
-Measured on this branch **with PR #5 (transitions) merged in**. Until #5 lands
-on `main`, the AC10/AC12 transition tests fail because `main`'s transition
-endpoint still writes the removed `flag_*` columns.
+Measured on this branch, up to date with `main` (includes #1, #2, #3 and #5).
 
 - **148 tests, all passing**: full list in [`coverage/test-results.txt`](coverage/test-results.txt)
 - **Coverage (line + branch)**: full report in [`coverage/coverage.txt`](coverage/coverage.txt)

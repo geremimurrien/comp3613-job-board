@@ -17,7 +17,7 @@ app\repositories\__init__.py              1      0      0      0   100%
 app\repositories\user.py                 67     41     10      0    34%   21-24, 27-39, 45, 48, 54-70, 73-82
 app\routers\__init__.py                  14      0      0      0   100%
 app\routers\admin_home.py                 9      1      0      0    89%   15
-app\routers\board.py                    113      4     28      4    94%   114, 124, 134, 163
+app\routers\board.py                    113      4     28      4    94%   116, 126, 136, 167
 app\routers\index.py                     14      7      4      0    39%   15-23
 app\routers\login.py                     24     12      2      0    46%   13, 26-47
 app\routers\logout.py                     9      3      0      0    67%   10-15
@@ -31,7 +31,7 @@ app\schemas\user.py                      11      0      0      0   100%
 app\seed.py                              35      3      8      1    91%   46-47, 56
 app\services\application_history.py      23      1      4      1    93%   24
 app\services\application_states.py       76      2      0      0    97%   20, 25
-app\services\applications.py            107     15     44      7    85%   33, 38-46, 103, 107-115, 129, 152, 170
+app\services\applications.py            107     15     44      7    85%   33, 38-46, 107, 111-119, 133, 156, 174
 app\services\auth_service.py             16      0      2      0   100%
 app\services\board_auth.py               25      1      6      1    94%   18
 app\services\listings.py                117      8     40      3    92%   30-31, 216, 227-236
