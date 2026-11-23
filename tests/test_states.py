@@ -96,3 +96,27 @@ def test_state_for_all_statuses(status, terminal):
 def test_state_for_unknown_status():
     with pytest.raises(ValueError, match="unknown application status"):
         state_for("cancelled")
+
+
+def test_next_status_follows_legal_path():
+    from app.services.application_states import next_status
+
+    status = "submitted"
+    for action, expected in [
+        ("mark_reviewed", "reviewed"),
+        ("shortlist", "shortlisted"),
+        ("hire", "hired"),
+    ]:
+        status = next_status(status, action)
+        assert status == expected
+
+
+def test_next_status_rejects_illegal_and_unknown_actions():
+    from app.services.application_states import next_status
+
+    with pytest.raises(InvalidTransitionError):
+        next_status("submitted", "hire")
+    with pytest.raises(ValueError, match="unknown action"):
+        next_status("submitted", "reopen")
+    with pytest.raises(ValueError, match="unknown application status"):
+        next_status("archived", "mark_reviewed")

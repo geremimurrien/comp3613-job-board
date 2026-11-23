@@ -13,6 +13,14 @@ from app.services import board_auth as auth
 router = APIRouter(tags=["job-board"])
 
 
+def _error(result: dict[str, Any], default_status: int = 400) -> HTTPException:
+    """Turn a service failure dict into an HTTP error with a meaningful code."""
+    return HTTPException(
+        status_code=result.get("code", default_status),
+        detail=result.get("error"),
+    )
+
+
 class LoginBody(BaseModel):
     email: str
     password: str
@@ -41,7 +49,7 @@ class ApplyBody(BaseModel):
 
 class TransitionBody(BaseModel):
     action: str = Field(
-        description="mark_reviewed | shortlist | reject | hire | reopen"
+        description="mark_reviewed | shortlist | reject | hire"
     )
     actor_id: int
 
@@ -58,7 +66,7 @@ def login(body: LoginBody) -> dict[str, Any]:
 def subscribe(body: ActorBody) -> dict[str, Any]:
     result = listings.subscribe(body.actor_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        raise _error(result)
     return result
 
 
@@ -87,7 +95,7 @@ def submit_listing(body: ListingBody) -> dict[str, Any]:
         body.external_url,
     )
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        raise _error(result)
     return result
 
 
@@ -95,7 +103,7 @@ def submit_listing(body: ListingBody) -> dict[str, Any]:
 def publish(listing_id: int, body: ActorBody) -> dict[str, Any]:
     result = listings.publish_listing(body.actor_id, listing_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        raise _error(result)
     return result
 
 
@@ -103,7 +111,7 @@ def publish(listing_id: int, body: ActorBody) -> dict[str, Any]:
 def notify(listing_id: int, body: ActorBody) -> dict[str, Any]:
     result = listings.notify_subscribers(body.actor_id, listing_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        raise _error(result)
     return result
 
 
@@ -113,7 +121,7 @@ def apply(body: ApplyBody) -> dict[str, Any]:
         body.actor_id, body.listing_id, body.cover_letter, body.resume_text
     )
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        raise _error(result)
     return result
 
 
@@ -126,7 +134,7 @@ def my_apps(actor_id: int) -> dict[str, Any]:
 def applicants(listing_id: int, actor_id: int) -> dict[str, Any]:
     result = applications.listing_applicants(actor_id, listing_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=403, detail=result.get("error"))
+        raise _error(result)
     return result
 
 
@@ -134,7 +142,7 @@ def applicants(listing_id: int, actor_id: int) -> dict[str, Any]:
 def export(listing_id: int, actor_id: int) -> dict[str, Any]:
     result = applications.export_applicants(actor_id, listing_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=403, detail=result.get("error"))
+        raise _error(result)
     return result
 
 
@@ -144,5 +152,5 @@ def transition(application_id: int, body: TransitionBody) -> dict[str, Any]:
         body.actor_id, application_id, body.action
     )
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        raise _error(result)
     return result
