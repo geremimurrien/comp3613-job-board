@@ -10,7 +10,10 @@ from app.database import engine
 from app.models.application import Application
 from app.models.listing import Listing
 from app.services.board_auth import get_user
-from app.services.lifecycle import ACTIONS, apply_action, derived_status_from_flags
+from app.services.application_states import InvalidTransitionError, state_for
+from app.services.listings import is_open
+
+ACTIONS = ("mark_reviewed", "shortlist", "reject", "hire")
 
 
 def apply(
@@ -22,14 +25,17 @@ def apply(
     user = get_user(graduate_id)
     if not user or user["role"] != "graduate":
         return {"ok": False, "error": "graduates only"}
-    # DEFECT: no programme eligibility check
+    if user.get("programme") != "DCIT":
+        return {"ok": False, "error": "only DCIT graduates may apply"}
 
     with Session(engine) as session:
         listing = session.get(Listing, listing_id)
         if listing is None:
             return {"ok": False, "error": "listing not found"}
-
-        # DEFECT: allows apply on pending / expired; external still creates a row
+        if not is_open(listing):
+            return {"ok": False, "error": "listing is not open"}
+        if listing.apply_mode != "collect":
+            return {"ok": False, "error": "listing uses external apply"}
         resume = resume_text or user.get("resume_text") or ""
         application = Application(
             listing_id=listing_id,
@@ -62,9 +68,8 @@ def my_applications(graduate_id: int) -> list[dict[str, Any]]:
         results = []
         for row in rows:
             app = row.model_dump()
-            # DEFECT: graduate view sometimes uses flag-derived status, not column
             view = dict(app)
-            view["status"] = derived_status_from_flags(app)
+            view["status"] = state_for(app["status"]).name
             results.append(view)
         return results
 
@@ -77,9 +82,10 @@ def listing_applicants(viewer_id: int, listing_id: int) -> dict[str, Any]:
         listing = session.get(Listing, listing_id)
         if listing is None:
             return {"ok": False, "error": "listing not found"}
-        # DEFECT (IDOR): ownership not checked for employers
         if viewer["role"] not in {"employer", "admin"}:
             return {"ok": False, "error": "forbidden"}
+        if viewer["role"] == "employer" and listing.employer_id != viewer["id"]:
+            return {"ok": False, "error": "you do not own this listing"}
         rows = session.exec(
             select(Application)
             .where(Application.listing_id == listing_id)
@@ -101,12 +107,10 @@ def export_applicants(admin_id: int, listing_id: int) -> dict[str, Any]:
 def transition_application(
     actor_id: int, application_id: int, action: str
 ) -> dict[str, Any]:
-    """Drive the poorly factored lifecycle module."""
     actor = get_user(actor_id)
     if not actor:
         return {"ok": False, "error": "unknown user"}
-    # DEFECT: admin may transition; any employer may transition any application
-    if actor["role"] not in {"employer", "admin"}:
+    if actor["role"] != "employer":
         return {"ok": False, "error": "forbidden"}
     if action not in ACTIONS:
         return {"ok": False, "error": f"action must be one of {ACTIONS}"}
@@ -116,22 +120,21 @@ def transition_application(
         if row is None:
             return {"ok": False, "error": "application not found"}
 
-        result = apply_action(row.model_dump(), action)
-        if not result.get("ok"):
-            return result
-        if not result.get("changed"):
-            return {
-                "ok": True,
-                "application": result["application"],
-                "changed": False,
-            }
+        listing = session.get(Listing, row.listing_id)
+        if listing is None or listing.employer_id != actor["id"]:
+            return {"ok": False, "error": "only the listing employer may transition applications"}
 
-        updated = result["row"]
-        row.status = updated["status"]
-        row.flag_reviewed = updated["flag_reviewed"]
-        row.flag_shortlisted = updated["flag_shortlisted"]
-        row.flag_rejected = updated["flag_rejected"]
-        row.flag_hired = updated["flag_hired"]
+        try:
+            state = state_for(row.status)
+            next_state = getattr(state, action)(row)
+        except (ValueError, InvalidTransitionError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+        row.status = next_state.name
+        row.flag_reviewed = int(next_state.name in {"reviewed", "shortlisted", "rejected", "hired"})
+        row.flag_shortlisted = int(next_state.name in {"shortlisted", "rejected", "hired"})
+        row.flag_rejected = int(next_state.name == "rejected")
+        row.flag_hired = int(next_state.name == "hired")
         session.add(row)
         session.commit()
         session.refresh(row)

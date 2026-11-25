@@ -20,7 +20,8 @@ def subscribe(graduate_id: int) -> dict[str, Any]:
     user = get_user(graduate_id)
     if not user or user["role"] != "graduate":
         return {"ok": False, "error": "graduates only"}
-    # DEFECT: no programme eligibility check
+    if user.get("programme") != "DCIT":
+        return {"ok": False, "error": "only DCIT graduates may subscribe"}
     with Session(engine) as session:
         existing = session.exec(
             select(Subscription).where(Subscription.graduate_id == graduate_id)
