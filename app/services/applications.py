@@ -11,8 +11,10 @@ from app.models.application import Application
 from app.models.listing import Listing
 from app.models.notification import Notification
 from app.services import listings as listing_service
-from app.services.application_states import InvalidTransitionError
+from app.services.application_states import InvalidTransitionError, state_for
 from app.services.board_auth import get_user
+
+ACTIONS = ("mark_reviewed", "shortlist", "reject", "hire")
 
 
 def apply(
@@ -32,19 +34,7 @@ def apply(
         if listing is None:
             return {"ok": False, "error": "listing not found", "status_code": 404}
 
-        if hasattr(listing_service, "is_open"):
-            is_open = listing_service.is_open(listing)
-        else:
-            from datetime import date
-
-            try:
-                is_open = (
-                    listing.status == "published"
-                    and date.fromisoformat(listing.deadline) >= date.today()
-                )
-            except (TypeError, ValueError):
-                is_open = False
-        if not is_open:
+        if not listing_service.is_open(listing):
             return {"ok": False, "error": "listing is closed", "status_code": 400}
 
         if listing.apply_mode == "external":
@@ -96,21 +86,12 @@ def my_applications(graduate_id: int) -> list[dict[str, Any]]:
         results = []
         for row in rows:
             view = row.model_dump()
+            view["status"] = state_for(row.status).name
             listing = session.get(Listing, row.listing_id)
             if listing is None:
                 is_open = False
-            elif hasattr(listing_service, "is_open"):
-                is_open = listing_service.is_open(listing)
             else:
-                from datetime import date
-
-                try:
-                    is_open = (
-                        listing.status == "published"
-                        and date.fromisoformat(listing.deadline) >= date.today()
-                    )
-                except (TypeError, ValueError):
-                    is_open = False
+                is_open = listing_service.is_open(listing)
 
             view["display_status"] = (
                 "closed"
@@ -155,6 +136,18 @@ def transition_application(
     actor_id: int, application_id: int, action: str
 ) -> dict[str, Any]:
     """Perform and persist one legal application state transition."""
+    actor = get_user(actor_id)
+    if not actor:
+        return {"ok": False, "error": "unknown user", "status_code": 404}
+    if actor["role"] != "employer":
+        return {"ok": False, "error": "forbidden", "status_code": 403}
+    if action not in ACTIONS:
+        return {
+            "ok": False,
+            "error": f"unknown action: {action}",
+            "status_code": 400,
+        }
+
     with Session(engine) as session:
         application = session.get(Application, application_id)
         if application is None:
@@ -167,12 +160,7 @@ def transition_application(
         if listing is None:
             return {"ok": False, "error": "listing not found", "status_code": 404}
 
-        actor = get_user(actor_id)
-        if (
-            not actor
-            or actor["role"] != "employer"
-            or actor["id"] != listing.employer_id
-        ):
+        if actor["id"] != listing.employer_id:
             return {
                 "ok": False,
                 "error": "only the listing employer may transition applications",
@@ -187,13 +175,6 @@ def transition_application(
                 "ok": False,
                 "error": f"cannot change a {application.status} application when the listing is closed",
                 "status_code": 409,
-            }
-
-        if action not in {"mark_reviewed", "shortlist", "reject", "hire"}:
-            return {
-                "ok": False,
-                "error": f"unknown action: {action}",
-                "status_code": 400,
             }
 
         from_status = application.status
