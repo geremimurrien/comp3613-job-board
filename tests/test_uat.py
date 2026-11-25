@@ -10,7 +10,6 @@ from app.models.application import Application
 from app.models.notification import Notification
 from app.seed import seed
 
-
 client = TestClient(app)
 
 
@@ -63,7 +62,9 @@ def test_uat_employer_submits_listing_stays_pending():
 
     assert result["status"] == "pending"
     with Session(engine) as session:
-        pending = session.exec(select(Application)).all()
+        pending = session.exec(
+            select(Application).where(Application.listing_id == result["listing_id"])
+        ).all()
         assert pending == []
 
     graduate_jobs = client.get("/api/jobs").json()["jobs"]
@@ -135,14 +136,19 @@ def test_uat_application_complete_lifecycle():
             json={"action": action, "actor_id": employer["id"]},
         )
         assert transitioned.status_code == 200
-        assert transitioned.json()["application"]["status"] == expected_status
+        assert transitioned.json()["to_status"] == expected_status
 
     my_applications = client.get(
         "/api/graduates/applications",
         params={"actor_id": graduate["id"]},
     )
     assert my_applications.status_code == 200
-    assert my_applications.json()["applications"][0]["status"] == "hired"
+    application = next(
+        item
+        for item in my_applications.json()["applications"]
+        if item["id"] == application_id
+    )
+    assert application["status"] == "hired"
 
 
 def test_uat_application_illegal_and_terminal_transitions_are_rejected():
@@ -169,7 +175,7 @@ def test_uat_application_illegal_and_terminal_transitions_are_rejected():
         f"/api/applications/{application_id}/transition",
         json={"action": "hire", "actor_id": employer["id"]},
     )
-    assert illegal.status_code == 400
+    assert illegal.status_code == 409
 
     for action in ("mark_reviewed", "shortlist", "reject"):
         legal_rejection = client.post(
@@ -183,7 +189,7 @@ def test_uat_application_illegal_and_terminal_transitions_are_rejected():
         f"/api/applications/{application_id}/transition",
         json={"action": "hire", "actor_id": employer["id"]},
     )
-    assert terminal.status_code == 400
+    assert terminal.status_code == 409
 
 
 def test_uat_only_listing_employer_can_view_and_transition_applications():
@@ -221,8 +227,8 @@ def test_uat_only_listing_employer_can_view_and_transition_applications():
     )
 
     assert denied_view.status_code == 403
-    assert denied_transition.status_code == 400
-    assert admin_transition.status_code == 400
+    assert denied_transition.status_code == 403
+    assert admin_transition.status_code == 403
 
 
 def test_uat_expired_and_pending_listings_are_hidden_from_graduates():
@@ -260,8 +266,8 @@ def test_uat_external_listing_does_not_collect_in_platform_application():
         },
     )
 
-    assert applied.status_code == 400
-    assert "external" in applied.json()["detail"].lower()
+    assert applied.status_code == 200
+    assert applied.json()["external_url"] == pending_external["external_url"]
     with Session(engine) as session:
         assert session.exec(
             select(Application).where(

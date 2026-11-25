@@ -9,9 +9,10 @@ from sqlmodel import Session, select
 from app.database import engine
 from app.models.application import Application
 from app.models.listing import Listing
-from app.services.board_auth import get_user
+from app.models.notification import Notification
+from app.services import listings as listing_service
 from app.services.application_states import InvalidTransitionError, state_for
-from app.services.listings import is_open
+from app.services.board_auth import get_user
 
 ACTIONS = ("mark_reviewed", "shortlist", "reject", "hire")
 
@@ -24,18 +25,39 @@ def apply(
 ) -> dict[str, Any]:
     user = get_user(graduate_id)
     if not user or user["role"] != "graduate":
-        return {"ok": False, "error": "graduates only"}
+        return {"ok": False, "error": "graduates only", "status_code": 403}
     if user.get("programme") != "DCIT":
-        return {"ok": False, "error": "only DCIT graduates may apply"}
+        return {"ok": False, "error": "DCIT graduates only", "status_code": 403}
 
     with Session(engine) as session:
         listing = session.get(Listing, listing_id)
         if listing is None:
-            return {"ok": False, "error": "listing not found"}
-        if not is_open(listing):
-            return {"ok": False, "error": "listing is not open"}
-        if listing.apply_mode != "collect":
-            return {"ok": False, "error": "listing uses external apply"}
+            return {"ok": False, "error": "listing not found", "status_code": 404}
+
+        if not listing_service.is_open(listing):
+            return {"ok": False, "error": "listing is closed", "status_code": 400}
+
+        if listing.apply_mode == "external":
+            return {
+                "ok": True,
+                "external": True,
+                "external_url": listing.external_url,
+                "message": f"Apply externally: {listing.external_url}",
+            }
+
+        existing = session.exec(
+            select(Application).where(
+                Application.listing_id == listing_id,
+                Application.graduate_id == graduate_id,
+            )
+        ).all()
+        if any(application.status != "rejected" for application in existing):
+            return {
+                "ok": False,
+                "error": "active application already exists",
+                "status_code": 409,
+            }
+
         resume = resume_text or user.get("resume_text") or ""
         application = Application(
             listing_id=listing_id,
@@ -43,10 +65,6 @@ def apply(
             cover_letter=cover_letter,
             resume_text=resume,
             status="submitted",
-            flag_reviewed=0,
-            flag_shortlisted=0,
-            flag_rejected=0,
-            flag_hired=0,
         )
         session.add(application)
         session.commit()
@@ -67,9 +85,19 @@ def my_applications(graduate_id: int) -> list[dict[str, Any]]:
         ).all()
         results = []
         for row in rows:
-            app = row.model_dump()
-            view = dict(app)
-            view["status"] = state_for(app["status"]).name
+            view = row.model_dump()
+            view["status"] = state_for(row.status).name
+            listing = session.get(Listing, row.listing_id)
+            if listing is None:
+                is_open = False
+            else:
+                is_open = listing_service.is_open(listing)
+
+            view["display_status"] = (
+                "closed"
+                if not is_open and row.status in {"submitted", "reviewed"}
+                else row.status
+            )
             results.append(view)
         return results
 
@@ -77,15 +105,15 @@ def my_applications(graduate_id: int) -> list[dict[str, Any]]:
 def listing_applicants(viewer_id: int, listing_id: int) -> dict[str, Any]:
     viewer = get_user(viewer_id)
     if not viewer:
-        return {"ok": False, "error": "unknown user"}
+        return {"ok": False, "error": "unknown user", "status_code": 404}
     with Session(engine) as session:
         listing = session.get(Listing, listing_id)
         if listing is None:
-            return {"ok": False, "error": "listing not found"}
+            return {"ok": False, "error": "listing not found", "status_code": 404}
+        if viewer["role"] == "employer" and listing.employer_id != viewer_id:
+            return {"ok": False, "error": "forbidden", "status_code": 403}
         if viewer["role"] not in {"employer", "admin"}:
-            return {"ok": False, "error": "forbidden"}
-        if viewer["role"] == "employer" and listing.employer_id != viewer["id"]:
-            return {"ok": False, "error": "you do not own this listing"}
+            return {"ok": False, "error": "forbidden", "status_code": 403}
         rows = session.exec(
             select(Application)
             .where(Application.listing_id == listing_id)
@@ -97,7 +125,7 @@ def listing_applicants(viewer_id: int, listing_id: int) -> dict[str, Any]:
 def export_applicants(admin_id: int, listing_id: int) -> dict[str, Any]:
     admin = get_user(admin_id)
     if not admin or admin["role"] != "admin":
-        return {"ok": False, "error": "admin only"}
+        return {"ok": False, "error": "admin only", "status_code": 403}
     result = listing_applicants(admin_id, listing_id)
     if not result.get("ok"):
         return result
@@ -107,35 +135,76 @@ def export_applicants(admin_id: int, listing_id: int) -> dict[str, Any]:
 def transition_application(
     actor_id: int, application_id: int, action: str
 ) -> dict[str, Any]:
+    """Perform and persist one legal application state transition."""
     actor = get_user(actor_id)
     if not actor:
-        return {"ok": False, "error": "unknown user"}
+        return {"ok": False, "error": "unknown user", "status_code": 404}
     if actor["role"] != "employer":
-        return {"ok": False, "error": "forbidden"}
+        return {"ok": False, "error": "forbidden", "status_code": 403}
     if action not in ACTIONS:
-        return {"ok": False, "error": f"action must be one of {ACTIONS}"}
+        return {
+            "ok": False,
+            "error": f"unknown action: {action}",
+            "status_code": 400,
+        }
 
     with Session(engine) as session:
-        row = session.get(Application, application_id)
-        if row is None:
-            return {"ok": False, "error": "application not found"}
+        application = session.get(Application, application_id)
+        if application is None:
+            return {
+                "ok": False,
+                "error": "application not found",
+                "status_code": 404,
+            }
+        listing = session.get(Listing, application.listing_id)
+        if listing is None:
+            return {"ok": False, "error": "listing not found", "status_code": 404}
 
-        listing = session.get(Listing, row.listing_id)
-        if listing is None or listing.employer_id != actor["id"]:
-            return {"ok": False, "error": "only the listing employer may transition applications"}
+        if actor["id"] != listing.employer_id:
+            return {
+                "ok": False,
+                "error": "only the listing employer may transition applications",
+                "status_code": 403,
+            }
 
+        if (
+            not listing_service.is_open(listing)
+            and application.status in {"submitted", "reviewed"}
+        ):
+            return {
+                "ok": False,
+                "error": f"cannot change a {application.status} application when the listing is closed",
+                "status_code": 409,
+            }
+
+        from_status = application.status
         try:
-            state = state_for(row.status)
-            next_state = getattr(state, action)(row)
-        except (ValueError, InvalidTransitionError) as exc:
-            return {"ok": False, "error": str(exc)}
+            status_change = application.perform(action, actor_id)
+        except InvalidTransitionError as exc:
+            return {
+                "ok": False,
+                "error": (
+                    f"invalid transition from {exc.from_status} "
+                    f"using action {exc.action}"
+                ),
+                "status_code": 409,
+            }
 
-        row.status = next_state.name
-        row.flag_reviewed = int(next_state.name in {"reviewed", "shortlisted", "rejected", "hired"})
-        row.flag_shortlisted = int(next_state.name in {"shortlisted", "rejected", "hired"})
-        row.flag_rejected = int(next_state.name == "rejected")
-        row.flag_hired = int(next_state.name == "hired")
-        session.add(row)
+        session.add(status_change)
+        session.add(
+            Notification(
+                user_id=application.graduate_id,
+                message=(
+                    f"Your application for {listing.title} changed "
+                    f"from {from_status} to {application.status}."
+                ),
+            )
+        )
         session.commit()
-        session.refresh(row)
-        return {"ok": True, "application": row.model_dump(), "changed": True}
+        return {
+            "ok": True,
+            "application_id": application.id,
+            "from_status": from_status,
+            "to_status": application.status,
+            "action": action,
+        }

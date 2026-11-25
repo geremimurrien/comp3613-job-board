@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.services import applications, listings
 from app.services import board_auth as auth
+from app.services.application_history import application_history
 
 router = APIRouter(tags=["job-board"])
 
@@ -152,7 +153,19 @@ def my_apps(actor_id: int) -> dict[str, Any]:
 def applicants(listing_id: int, actor_id: int) -> dict[str, Any]:
     result = applications.listing_applicants(actor_id, listing_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=403, detail=result.get("error"))
+        raise HTTPException(
+            status_code=result.get("status_code", 403),
+            detail=result.get("error"),
+        )
+    for application in result["applicants"]:
+        details = application_history(application["id"])
+        if not details.get("ok"):
+            raise HTTPException(
+                status_code=details.get("status_code", 400),
+                detail=details.get("error"),
+            )
+        application["allowed_actions"] = details["allowed_actions"]
+        application["status_history"] = details["status_history"]
     return result
 
 
@@ -170,5 +183,8 @@ def transition(application_id: int, body: TransitionBody) -> dict[str, Any]:
         body.actor_id, application_id, body.action
     )
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        raise HTTPException(
+            status_code=result.get("status_code", 400),
+            detail=result.get("error"),
+        )
     return result
