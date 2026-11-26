@@ -68,6 +68,12 @@ def apply(
                 "status_code": 409,
             }
 
+        if not (cover_letter or "").strip():
+            return {
+                "ok": False,
+                "error": "cover letter is required",
+                "status_code": 400,
+            }
         resume = resume_text or user.get("resume_text") or ""
         application = Application(
             listing_id=listing_id,

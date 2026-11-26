@@ -1,0 +1,22 @@
+[run]
+source = app
+branch = True
+# Course tooling, not job-board behaviour (PDF report, transcript export,
+# use-case diagram, skills verifier, CLI). Excluded so the figure reflects
+# the application under test.
+omit =
+    app/report_pdf.py
+    app/transcript_export.py
+    app/usecase_diagram.py
+    app/skill_integrity.py
+    app/cli.py
+
+[report]
+show_missing = True
+skip_covered = False
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+
+[html]
+directory = docs/coverage/html

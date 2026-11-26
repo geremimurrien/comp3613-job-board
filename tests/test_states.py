@@ -96,3 +96,4 @@ def test_state_for_all_statuses(status, terminal):
 def test_state_for_unknown_status():
     with pytest.raises(ValueError, match="unknown application status"):
         state_for("cancelled")
+

@@ -1,0 +1,44 @@
+Name                                  Stmts   Miss Branch BrPart  Cover   Missing
+---------------------------------------------------------------------------------
+app\config.py                            78     37     24      2    44%   19, 42, 47-58, 63-74, 78-82, 87-94, 117
+app\database.py                          67     26     20      4    52%   19, 21, 48-71, 86, 88-100, 105-109, 129
+app\dependencies\__init__.py              2      0      0      0   100%
+app\dependencies\auth.py                 39     20      6      1    44%   20-32, 35-39, 45, 48-53
+app\dependencies\session.py               5      0      0      0   100%
+app\main.py                              42     10      6      0    71%   44-54
+app\models\__init__.py                    7      0      0      0   100%
+app\models\application.py                20      1      2      1    91%   25
+app\models\listing.py                     6      0      0      0   100%
+app\models\notification.py                5      0      0      0   100%
+app\models\status_change.py               8      0      0      0   100%
+app\models\subscription.py                5      0      0      0   100%
+app\models\user.py                       12      0      0      0   100%
+app\repositories\__init__.py              1      0      0      0   100%
+app\repositories\user.py                 67     41     10      0    34%   21-24, 27-39, 45, 48, 54-70, 73-82
+app\routers\__init__.py                  14      0      0      0   100%
+app\routers\admin_home.py                 9      1      0      0    89%   15
+app\routers\board.py                    113      4     28      4    94%   116, 126, 136, 167
+app\routers\index.py                     14      7      4      0    39%   15-23
+app\routers\login.py                     24     12      2      0    46%   13, 26-47
+app\routers\logout.py                     9      3      0      0    67%   10-15
+app\routers\register.py                  22     10      0      0    55%   13, 25-33
+app\routers\server_config.py            205    155     46      0    20%   39, 44-46, 50, 54-61, 65-87, 105-106, 126-130, 135-147, 159-172, 180-182, 190-201, 214-223, 235-255, 263-276, 284-299, 310-318, 326-338, 346-354, 362-367, 374-401
+app\routers\user_home.py                  9      1      0      0    89%   15
+app\routers\users.py                     13      3      0      0    77%   14-16
+app\schemas\__init__.py                   2      0      0      0   100%
+app\schemas\auth.py                       3      0      0      0   100%
+app\schemas\user.py                      11      0      0      0   100%
+app\seed.py                              35      3      8      1    91%   46-47, 56
+app\services\application_history.py      23      1      4      1    93%   24
+app\services\application_states.py       76      2      0      0    97%   20, 25
+app\services\applications.py            107     15     44      7    85%   33, 38-46, 107, 111-119, 133, 156, 174
+app\services\auth_service.py             16      0      2      0   100%
+app\services\board_auth.py               25      1      6      1    94%   18
+app\services\listings.py                117      8     40      3    92%   30-31, 216, 227-236
+app\services\user_service.py              9      0      0      0   100%
+app\utilities\__init__.py                 0      0      0      0   100%
+app\utilities\flash.py                    8      4      2      0    40%   5-7, 11
+app\utilities\pagination.py              27     15      6      0    36%   5-8, 12, 16, 20, 24, 27-35
+app\utilities\security.py                18      2      0      0    89%   34-35
+---------------------------------------------------------------------------------
+TOTAL                                  1273    382    260     25    66%

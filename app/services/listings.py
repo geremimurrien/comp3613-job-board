@@ -89,6 +89,15 @@ def submit_listing(
             "status_code": 400,
         }
 
+    try:
+        date.fromisoformat(deadline)
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "error": "deadline must be an ISO date YYYY-MM-DD",
+            "status_code": 400,
+        }
+
     status = "pending"
     with Session(engine) as session:
         listing = Listing(
@@ -208,6 +217,12 @@ def notify_subscribers(admin_id: int, listing_id: int) -> dict[str, Any]:
                 "ok": False,
                 "error": "listing not found",
                 "status_code": 404,
+            }
+        if listing.status != "published":
+            return {
+                "ok": False,
+                "error": "cannot notify about an unpublished listing",
+                "status_code": 409,
             }
         subs = session.exec(select(Subscription)).all()
         for sub in subs:
