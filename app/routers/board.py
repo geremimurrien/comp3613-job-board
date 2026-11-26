@@ -59,9 +59,7 @@ def login(body: LoginBody) -> dict[str, Any]:
 def subscribe(body: ActorBody) -> dict[str, Any]:
     result = listings.subscribe(body.actor_id)
     if not result.get("ok"):
-        raise HTTPException(
-            status_code=result.get("status_code", 400), detail=result.get("error")
-        )
+        raise HTTPException(status_code=400, detail=result.get("error"))
     return result
 
 
@@ -142,9 +140,7 @@ def apply(body: ApplyBody) -> dict[str, Any]:
         body.actor_id, body.listing_id, body.cover_letter, body.resume_text
     )
     if not result.get("ok"):
-        raise HTTPException(
-            status_code=result.get("status_code", 400), detail=result.get("error")
-        )
+        raise HTTPException(status_code=400, detail=result.get("error"))
     return result
 
 
@@ -177,9 +173,7 @@ def applicants(listing_id: int, actor_id: int) -> dict[str, Any]:
 def export(listing_id: int, actor_id: int) -> dict[str, Any]:
     result = applications.export_applicants(actor_id, listing_id)
     if not result.get("ok"):
-        raise HTTPException(
-            status_code=result.get("status_code", 403), detail=result.get("error")
-        )
+        raise HTTPException(status_code=403, detail=result.get("error"))
     return result
 
 
